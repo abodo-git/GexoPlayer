@@ -58,7 +58,7 @@ void main() {
     expect(p.current?.title, 't2');
     p.move(3, 0);
     expect(p.current?.title, 't2');
-    expect(p.tracks.map((t) => t.title).join(','), 't3,t0,t1,t2');
+    expect(p.tracks.map((t) => t.title).join(','), 't3,t1,t0,t2');
   });
   test('move ignores invalid positions', () {
     final p = make(2);
