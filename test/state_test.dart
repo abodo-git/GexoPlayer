@@ -4,7 +4,7 @@ import 'package:gexoplayer/core/state.dart';
 
 void main() {
   test('defaults are sane', () {
-    final s = PlayerState();
+    final s = GxPlayerState();
     expect(s.tracks, isEmpty);
     expect(s.index, isNull);
     expect(s.volume, 0.8);
@@ -13,7 +13,7 @@ void main() {
   });
 
   test('json round trip preserves everything', () {
-    final s = PlayerState()
+    final s = GxPlayerState()
       ..tracks = ['/a.mp3', '/b.mp3']
       ..index = 1
       ..shuffle = true
@@ -25,7 +25,7 @@ void main() {
     s.eq.enabled = true;
     s.eq.setBand(0, 6);
 
-    final back = PlayerState.fromJson(s.toJson());
+    final back = GxPlayerState.fromJson(s.toJson());
     expect(back.tracks, ['/a.mp3', '/b.mp3']);
     expect(back.index, 1);
     expect(back.shuffle, isTrue);
@@ -39,7 +39,7 @@ void main() {
   });
 
   test('malformed fields fall back to defaults', () {
-    final back = PlayerState.fromJson({
+    final back = GxPlayerState.fromJson({
       'tracks': 'not-a-list',
       'index': 9,
       'shuffle': 'yes',
@@ -58,7 +58,7 @@ void main() {
   });
 
   test('out-of-range index is dropped', () {
-    final back = PlayerState.fromJson({
+    final back = GxPlayerState.fromJson({
       'tracks': ['/a.mp3'],
       'index': 5,
     });

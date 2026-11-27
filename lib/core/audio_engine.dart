@@ -39,9 +39,9 @@ class AudioEngine {
     }
   }
 
-  /// Apply a previously saved [PlayerState]: playlist, modes, volume, EQ,
+  /// Apply a previously saved [GxPlayerState]: playlist, modes, volume, EQ,
   /// and cue the current track at [resumeAt] without autoplaying.
-  Future<void> restore(PlayerState s, {Duration resumeAt = Duration.zero}) async {
+  Future<void> restore(GxPlayerState s, {Duration resumeAt = Duration.zero}) async {
     eq.copyFrom(s.eq);
     _volume = s.volume;
     playlist.tracks

@@ -71,9 +71,9 @@ class _PlayerPageState extends State<PlayerPage> {
     super.dispose();
   }
 
-  PlayerState _snapshot() {
+  GxPlayerState _snapshot() {
     final pl = engine.playlist;
-    final s = PlayerState()
+    final s = GxPlayerState()
       ..tracks = pl.tracks.map((t) => t.path).toList()
       ..index = pl.index
       ..shuffle = pl.shuffle

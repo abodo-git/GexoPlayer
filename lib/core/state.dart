@@ -6,7 +6,7 @@ enum GxThemeMode { modern, classic }
 
 /// Everything that survives an app restart. Pure Dart, unit tested;
 /// [StateStore] handles the file I/O.
-class PlayerState {
+class GxPlayerState {
   List<String> tracks = [];
   int? index;
   bool shuffle = false;
@@ -33,8 +33,8 @@ class PlayerState {
       };
 
   /// Tolerant parse: any missing or malformed field falls back to default.
-  static PlayerState fromJson(Map<String, dynamic> j) {
-    final s = PlayerState();
+  static GxPlayerState fromJson(Map<String, dynamic> j) {
+    final s = GxPlayerState();
     final t = j['tracks'];
     if (t is List) s.tracks = t.whereType<String>().toList();
     final i = j['index'];
