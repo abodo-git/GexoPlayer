@@ -38,6 +38,25 @@ class GxPlaylist {
     index = null;
   }
 
+  /// Move the track at [from] to final position [to], keeping the
+  /// current selection on the same track.
+  void move(int from, int to) {
+    if (from == to) return;
+    if (from < 0 || from >= tracks.length || to < 0 || to >= tracks.length) {
+      return;
+    }
+    final t = tracks.removeAt(from);
+    tracks.insert(to, t);
+    if (index == null) return;
+    if (index == from) {
+      index = to;
+    } else if (from < index! && to >= index!) {
+      index = index! - 1;
+    } else if (from > index! && to <= index!) {
+      index = index! + 1;
+    }
+  }
+
   void select(int i) {
     if (i >= 0 && i < tracks.length) index = i;
   }

@@ -14,11 +14,7 @@ class GexoPlayerApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'GexoPlayer',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          brightness: Brightness.dark,
-          colorSchemeSeed: const Color(0xFF7C4DFF),
-          useMaterial3: true,
-        ),
+        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
         home: const PlayerPage(),
       );
 }

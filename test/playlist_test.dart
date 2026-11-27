@@ -43,4 +43,29 @@ void main() {
     p.clear();
     expect(p.current, isNull);
   });
+  test('move reorders and current track follows', () {
+    final p = make(4)..select(2);
+    p.move(2, 0);
+    expect(p.tracks.map((t) => t.title).join(','), 't2,t0,t1,t3');
+    expect(p.current?.title, 't2');
+    p.move(0, 3);
+    expect(p.tracks.map((t) => t.title).join(','), 't0,t1,t3,t2');
+    expect(p.current?.title, 't2');
+  });
+  test('move around current shifts the index', () {
+    final p = make(4)..select(2);
+    p.move(0, 1);
+    expect(p.current?.title, 't2');
+    p.move(3, 0);
+    expect(p.current?.title, 't2');
+    expect(p.tracks.map((t) => t.title).join(','), 't3,t0,t1,t2');
+  });
+  test('move ignores invalid positions', () {
+    final p = make(2);
+    p.move(-1, 0);
+    p.move(0, 5);
+    p.move(1, 1);
+    expect(p.tracks.map((t) => t.title).join(','), 't0,t1');
+    expect(p.current?.title, 't0');
+  });
 }
