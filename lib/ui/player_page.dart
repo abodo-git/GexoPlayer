@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/audio_engine.dart';
+import '../core/backend.dart';
 import '../core/m3u.dart';
 import '../core/playlist.dart';
 import '../core/state.dart';
@@ -17,15 +18,34 @@ import 'eq_sheet.dart';
 import 'theme.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key});
+  /// Inject a backend (tests, screenshots) and turn persistence off.
+  final AudioBackend? backend;
+  final bool persist;
+  final GxThemeMode? initialTheme;
+  /// Pre-filled playlist for tests and screenshots (skips the file pickers).
+  final List<GxTrack>? initialTracks;
+  const PlayerPage(
+      {super.key,
+      this.backend,
+      this.persist = true,
+      this.initialTheme,
+      this.initialTracks});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
 class _PlayerPageState extends State<PlayerPage> {
-  late final AudioEngine engine = AudioEngine(onChanged: () {
-    if (mounted) setState(() {});
-  });
+  late final AudioEngine engine = AudioEngine(
+    backend: widget.backend,
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+  );
+  final TextEditingController _searchCtl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  final FocusNode _rootFocus = FocusNode();
+  bool _searching = false;
+  String _query = '';
   final StateStore _store = StateStore();
 
   Duration pos = Duration.zero, dur = Duration.zero;
@@ -48,8 +68,13 @@ class _PlayerPageState extends State<PlayerPage> {
     engine.duration.listen((d) {
       if (mounted) setState(() => dur = d);
     });
+    if (widget.initialTheme != null) themeMode = widget.initialTheme!;
     _posTimer = Timer.periodic(const Duration(seconds: 5), (_) => _persistSoon());
-    _restore();
+    if (widget.persist) {
+      _restore();
+    } else if (widget.initialTracks != null) {
+      engine.playlist.add(widget.initialTracks!);
+    }
   }
 
   Future<void> _restore() async {
@@ -66,7 +91,10 @@ class _PlayerPageState extends State<PlayerPage> {
   void dispose() {
     _saveTimer?.cancel();
     _posTimer?.cancel();
-    unawaited(_store.save(_snapshot()));
+    _searchCtl.dispose();
+    _searchFocus.dispose();
+    _rootFocus.dispose();
+    if (widget.persist) unawaited(_store.save(_snapshot()));
     engine.dispose();
     super.dispose();
   }
@@ -80,6 +108,7 @@ class _PlayerPageState extends State<PlayerPage> {
       ..repeat = pl.repeat
       ..positionMs = pos.inMilliseconds
       ..volume = engine.volume
+      ..speed = engine.speed
       ..theme = themeMode
       ..showRemaining = showRemaining;
     s.eq.copyFrom(engine.eq);
@@ -230,6 +259,117 @@ class _PlayerPageState extends State<PlayerPage> {
         : '$sign$m:$sec';
   }
 
+  // --- Keyboard ------------------------------------------------------------
+
+  bool get _typing => _searchFocus.hasFocus;
+
+  Map<ShortcutActivator, VoidCallback> _shortcuts() {
+    void guard(VoidCallback f) {
+      if (!_typing) f();
+    }
+
+    void seekBy(int sec) {
+      final t = pos + Duration(seconds: sec);
+      final max = dur == Duration.zero ? t : dur;
+      engine.seek(t < Duration.zero ? Duration.zero : (t > max ? max : t));
+    }
+
+    void vol(double d) {
+      engine.setVolume(engine.volume + d);
+      setState(() {});
+      _persistSoon();
+    }
+
+    return {
+      const SingleActivator(LogicalKeyboardKey.space): () => guard(engine.toggle),
+      const SingleActivator(LogicalKeyboardKey.arrowRight): () => guard(() => seekBy(5)),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft): () => guard(() => seekBy(-5)),
+      const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
+          guard(() => seekBy(30)),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
+          guard(() => seekBy(-30)),
+      const SingleActivator(LogicalKeyboardKey.arrowUp): () => guard(() => vol(0.05)),
+      const SingleActivator(LogicalKeyboardKey.arrowDown): () => guard(() => vol(-0.05)),
+      const SingleActivator(LogicalKeyboardKey.keyN): () => guard(() => engine.next()),
+      const SingleActivator(LogicalKeyboardKey.keyP): () => guard(() => engine.previous()),
+      const SingleActivator(LogicalKeyboardKey.keyM): () => guard(engine.toggleMute),
+      const SingleActivator(LogicalKeyboardKey.keyS): () => guard(() {
+            setState(() => engine.playlist.shuffle = !engine.playlist.shuffle);
+            _persistSoon();
+          }),
+      const SingleActivator(LogicalKeyboardKey.keyR): () => guard(() {
+            final pl = engine.playlist;
+            setState(() => pl.repeat =
+                GxRepeat.values[(pl.repeat.index + 1) % GxRepeat.values.length]);
+            _persistSoon();
+          }),
+      const SingleActivator(LogicalKeyboardKey.keyF, control: true): _toggleSearch,
+      const SingleActivator(LogicalKeyboardKey.slash): () => guard(_toggleSearch),
+      const SingleActivator(LogicalKeyboardKey.escape): () {
+        if (_searching) _toggleSearch();
+      },
+    };
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _query = '';
+        _searchCtl.clear();
+        _rootFocus.requestFocus();
+      }
+    });
+    if (_searching) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _searchFocus.requestFocus());
+    }
+  }
+
+  Widget _searchBar() {
+    final n = engine.playlist.search(_query).length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: TextField(
+        controller: _searchCtl,
+        focusNode: _searchFocus,
+        style: TextStyle(color: palette.text, fontSize: 14),
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon: Icon(Icons.search, size: 18, color: palette.text),
+          suffixText: _query.isEmpty ? null : '$n found',
+          hintText: 'Search title, artist, album',
+          border: OutlineInputBorder(
+              borderSide: BorderSide(color: palette.border)),
+        ),
+        onChanged: (v) => setState(() => _query = v),
+      ),
+    );
+  }
+
+  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+  String _speedLabel(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
+
+  Future<void> _sleepMenu() async {
+    final r = await showMenu<int>(
+      context: context,
+      position: const RelativeRect.fromLTRB(1000, 56, 8, 0),
+      items: [
+        for (final m in [5, 10, 15, 30, 45, 60, 90])
+          PopupMenuItem(value: m, child: Text('Stop after $m min')),
+        if (engine.sleep.active)
+          const PopupMenuItem(value: -1, child: Text('Cancel sleep timer')),
+      ],
+    );
+    if (r == null) return;
+    if (r < 0) {
+      engine.sleep.cancel();
+    } else {
+      engine.sleep.start(Duration(minutes: r));
+    }
+    setState(() {});
+  }
+
   // --- UI ------------------------------------------------------------------
 
   @override
@@ -237,15 +377,24 @@ class _PlayerPageState extends State<PlayerPage> {
     final pl = engine.playlist;
     return Theme(
       data: palette.material(),
-      child: Scaffold(
-        body: SafeArea(
-          child: Column(children: [
-            _header(),
-            _nowPlaying(),
-            Expanded(child: _playlistView(pl)),
-            _seekCluster(),
-            _transport(pl),
-          ]),
+      child: CallbackShortcuts(
+        bindings: _shortcuts(),
+        child: Focus(
+          focusNode: _rootFocus,
+          autofocus: true,
+          child: Scaffold(
+            body: SafeArea(
+              child: Column(children: [
+                _header(),
+                _nowPlaying(),
+                if (_searching) _searchBar(),
+                Expanded(child: _playlistView(pl)),
+                _seekCluster(),
+                _toolsRow(),
+                _transport(pl),
+              ]),
+            ),
+          ),
         ),
       ),
     );
@@ -262,6 +411,7 @@ class _PlayerPageState extends State<PlayerPage> {
         Icon(Icons.graphic_eq, color: palette.accent, size: 20),
         const SizedBox(width: 8),
         Text('GexoPlayer',
+            maxLines: 1,
             style: TextStyle(
                 color: palette.text,
                 fontSize: 16,
@@ -272,6 +422,12 @@ class _PlayerPageState extends State<PlayerPage> {
             style: TextStyle(
                 color: palette.text.withValues(alpha: 0.45), fontSize: 11)),
         const Spacer(),
+        IconButton(
+          tooltip: 'Search (Ctrl+F)',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.search, color: _searching ? palette.accent : palette.text),
+          onPressed: _toggleSearch,
+        ),
         IconButton(
           tooltip: 'Equalizer',
           visualDensity: VisualDensity.compact,
@@ -307,6 +463,12 @@ class _PlayerPageState extends State<PlayerPage> {
                 _exportM3u();
               case 'clear':
                 _clearPlaylist();
+              default:
+                if (v.startsWith('sort:')) {
+                  final key = GxSort.values.byName(v.substring(5));
+                  setState(() => engine.playlist.sortBy(key));
+                  _persistSoon();
+                }
             }
           },
           itemBuilder: (_) => const [
@@ -316,6 +478,12 @@ class _PlayerPageState extends State<PlayerPage> {
             PopupMenuItem(value: 'import', child: Text('Import M3U playlist')),
             PopupMenuItem(value: 'export', child: Text('Export as M3U')),
             PopupMenuDivider(),
+            PopupMenuItem(value: 'sort:title', child: Text('Sort by title')),
+            PopupMenuItem(value: 'sort:artist', child: Text('Sort by artist')),
+            PopupMenuItem(value: 'sort:album', child: Text('Sort by album')),
+            PopupMenuItem(value: 'sort:fileName', child: Text('Sort by file name')),
+            PopupMenuItem(value: 'sort:duration', child: Text('Sort by length')),
+            PopupMenuDivider(),
             PopupMenuItem(value: 'clear', child: Text('Clear playlist')),
           ],
         ),
@@ -323,94 +491,239 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  Widget _cover(GxTrack? t, double size) {
+    final box = BoxDecoration(
+      color: palette.panelBg,
+      border: Border.all(color: palette.border),
+      borderRadius: BorderRadius.circular(4),
+    );
+    return Container(
+      width: size,
+      height: size,
+      clipBehavior: Clip.antiAlias,
+      decoration: box,
+      child: t?.cover != null
+          ? Image.memory(t!.cover!,
+              fit: BoxFit.cover, gaplessPlayback: true, errorBuilder: (_, _, _) => _noArt(size))
+          : _noArt(size),
+    );
+  }
+
+  Widget _noArt(double size) => Icon(Icons.music_note,
+      size: size * 0.5, color: palette.text.withValues(alpha: 0.35));
+
   Widget _nowPlaying() {
     final t = engine.playlist.current;
+    final sub = [if (t?.artist != null) t!.artist!, if (t?.album != null) t!.album!]
+        .join('  \u2022  ');
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: palette.lcdBg,
         border: Border.all(color: palette.border),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(
-        t == null ? 'GexoPlayer ready' : t.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: lcdStyle(palette, size: 13),
+      child: Row(children: [
+        _cover(t, 64),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              t == null ? 'GexoPlayer ready' : t.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: lcdStyle(palette, size: 15),
+            ),
+            if (sub.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: lcdStyle(palette, size: 12)
+                        .copyWith(color: palette.lcdText.withValues(alpha: 0.7))),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _row(GxPlaylist pl, int i, {Key? key}) {
+    final t = pl.tracks[i];
+    final selected = i == pl.index;
+    final queued = pl.queue.indexOf(t);
+    final fg = selected ? palette.playlistSelectedText : palette.playlistText;
+    return KeyedSubtree(
+      key: key,
+      child: ListTile(
+        tileColor: selected ? palette.playlistSelectedBg : null,
+        dense: true,
+        visualDensity: VisualDensity.compact,
+        leading: SizedBox(
+          width: 34,
+          child: Text('${i + 1}.',
+              style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: palette.playlistText.withValues(alpha: 0.6))),
+        ),
+        title: Text(
+          t.display,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 13,
+            color: fg,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (queued >= 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text('Q${queued + 1}',
+                  style: TextStyle(
+                      color: palette.accent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+            ),
+          if (t.duration != null)
+            Text(_fmt(t.duration!),
+                style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: palette.playlistText.withValues(alpha: 0.7))),
+          PopupMenuButton<String>(
+            tooltip: 'Track actions',
+            icon: Icon(Icons.more_horiz,
+                size: 18, color: palette.playlistText.withValues(alpha: 0.7)),
+            onSelected: (v) {
+              switch (v) {
+                case 'next':
+                  setState(() => pl.playNext(i));
+                case 'remove':
+                  _removeAt(i);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'next', child: Text('Play next')),
+              PopupMenuItem(value: 'remove', child: Text('Remove')),
+            ],
+          ),
+        ]),
+        onTap: () async {
+          await engine.playIndex(i);
+          _persistSoon();
+        },
       ),
     );
   }
 
   Widget _playlistView(GxPlaylist pl) {
+    final matches = pl.search(_query);
+    final filtering = _query.trim().isNotEmpty;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: palette.playlistBg,
         border: Border.all(color: palette.border),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: pl.tracks.isEmpty
+      child: Material(
+        color: palette.playlistBg,
+        child: pl.tracks.isEmpty
           ? Center(
               child: Text('Add music to start  (menu, top right)',
                   style: TextStyle(color: palette.playlistText.withValues(alpha: 0.5))))
-          : ReorderableListView.builder(
-              buildDefaultDragHandles: true,
-              itemCount: pl.tracks.length,
-              onReorder: (oldIndex, newIndex) {
-                setState(() {
-                  if (newIndex > oldIndex) newIndex -= 1;
-                  pl.move(oldIndex, newIndex);
-                });
-                _persistSoon();
-              },
-              itemBuilder: (_, i) {
-                final t = pl.tracks[i];
-                final selected = i == pl.index;
-                return Container(
-                  key: ObjectKey(t),
-                  color: selected ? palette.playlistSelectedBg : null,
-                  child: ListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    leading: SizedBox(
-                      width: 34,
-                      child: Text('${i + 1}.',
+          : filtering
+              ? (matches.isEmpty
+                  ? Center(
+                      child: Text('No matches',
                           style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              color: palette.playlistText.withValues(alpha: 0.6))),
-                    ),
-                    title: Text(
-                      t.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                        color: selected
-                            ? palette.playlistSelectedText
-                            : palette.playlistText,
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.close,
-                          size: 16,
-                          color: palette.playlistText.withValues(alpha: 0.6)),
-                      onPressed: () => _removeAt(i),
-                    ),
-                    onTap: () async {
-                      await engine.playIndex(i);
-                      _persistSoon();
-                    },
-                  ),
-                );
-              },
+                              color: palette.playlistText.withValues(alpha: 0.5))))
+                  : ListView.builder(
+                      itemCount: matches.length,
+                      itemBuilder: (_, k) => _row(pl, matches[k], key: ValueKey(matches[k])),
+                    ))
+              : ReorderableListView.builder(
+                  buildDefaultDragHandles: true,
+                  itemCount: pl.tracks.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      pl.move(oldIndex, newIndex);
+                    });
+                    _persistSoon();
+                  },
+                  itemBuilder: (_, i) => _row(pl, i, key: ObjectKey(pl.tracks[i])),
+                ),
+      ),
+    );
+  }
+
+  Widget _chip({required Widget child, VoidCallback? onTap, bool active = false}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          border: Border.all(color: active ? palette.accent : palette.border),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _toolsRow() {
+    final rem = engine.sleep.remaining;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+      child: Row(children: [
+        PopupMenuButton<double>(
+          tooltip: 'Playback speed',
+          initialValue: engine.speed,
+          onSelected: (v) {
+            engine.setSpeed(v);
+            _persistSoon();
+          },
+          itemBuilder: (_) => [
+            for (final v in _speeds)
+              CheckedPopupMenuItem(
+                  value: v, checked: v == engine.speed, child: Text(_speedLabel(v))),
+          ],
+          child: IgnorePointer(
+            child: _chip(
+              active: engine.speed != 1.0,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.speed, size: 14, color: palette.text),
+                const SizedBox(width: 4),
+                Text(_speedLabel(engine.speed),
+                    style: TextStyle(color: palette.text, fontSize: 12)),
+              ]),
             ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _chip(
+          active: engine.sleep.active,
+          onTap: _sleepMenu,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.bedtime, size: 14, color: palette.text),
+            const SizedBox(width: 4),
+            Text(rem == null ? 'Sleep' : _fmt(rem),
+                style: TextStyle(color: palette.text, fontSize: 12)),
+          ]),
+        ),
+        const Spacer(),
+        Text('${engine.playlist.tracks.length} tracks',
+            style: TextStyle(color: palette.text.withValues(alpha: 0.5), fontSize: 11)),
+      ]),
     );
   }
 
@@ -460,7 +773,8 @@ class _PlayerPageState extends State<PlayerPage> {
       padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         IconButton(
-          tooltip: 'Shuffle',
+          tooltip: 'Shuffle (S)',
+          visualDensity: VisualDensity.compact,
           icon: Icon(Icons.shuffle,
               size: 20, color: pl.shuffle ? palette.accent : palette.text),
           onPressed: () {
@@ -499,7 +813,8 @@ class _PlayerPageState extends State<PlayerPage> {
           },
         ),
         IconButton(
-          tooltip: 'Repeat',
+          tooltip: 'Repeat (R)',
+          visualDensity: VisualDensity.compact,
           icon: Icon(
             pl.repeat == GxRepeat.one ? Icons.repeat_one : Icons.repeat,
             size: 20,
@@ -512,9 +827,16 @@ class _PlayerPageState extends State<PlayerPage> {
           },
         ),
         const SizedBox(width: 4),
-        Icon(Icons.volume_up, size: 18, color: palette.text.withValues(alpha: 0.8)),
+        IconButton(
+          tooltip: 'Mute (M)',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 30, height: 40),
+          icon: Icon(engine.muted ? Icons.volume_off : Icons.volume_up,
+              size: 18, color: engine.muted ? palette.accent : palette.text.withValues(alpha: 0.8)),
+          onPressed: engine.toggleMute,
+        ),
         SizedBox(
-          width: 110,
+          width: 96,
           child: Slider(
             value: engine.volume,
             onChanged: (v) {

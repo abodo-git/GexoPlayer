@@ -15,6 +15,7 @@ class GxPlayerState {
   double volume = 0.8;
   GxThemeMode theme = GxThemeMode.modern;
   bool showRemaining = false;
+  double speed = 1.0;
   final GxEq eq = GxEq();
 
   static const schemaVersion = 2;
@@ -29,6 +30,7 @@ class GxPlayerState {
         'volume': volume,
         'theme': theme.name,
         'showRemaining': showRemaining,
+        'speed': speed,
         'eq': eq.toJson(),
       };
 
@@ -48,6 +50,8 @@ class GxPlayerState {
     s.theme =
         GxThemeMode.values.asNameMap()[j['theme']] ?? GxThemeMode.modern;
     s.showRemaining = j['showRemaining'] == true;
+    final sp = j['speed'];
+    if (sp is num) s.speed = sp.toDouble().clamp(0.5, 2.0).toDouble();
     final e = j['eq'];
     if (e is Map<String, dynamic>) s.eq.loadJson(e);
     return s;

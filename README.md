@@ -2,7 +2,13 @@
 
 A fast, Winamp-inspired music player. One Flutter/Dart codebase for **Windows** and **Android** (Linux builds for development). Audio is played by libmpv through [media_kit](https://pub.dev/packages/media_kit): gapless-capable, wide format support.
 
-## Status (v0.2)
+## Status (v0.3)
+- Tags and embedded cover art (title, artist, album, length), search (Ctrl+F or /), sort, play-next queue
+- Sleep timer, playback speed 0.5x-2x, mute
+- Keyboard: Space play/pause, arrows seek/volume, N/P next/previous, S shuffle, R repeat, M mute
+- Plan for the professional-player roadmap: docs/UPGRADE_PLAN.md
+
+### Earlier (v0.2)
 - Playlist persists across restarts (tracks, position, shuffle/repeat, volume, theme, EQ)
 - Compact Winamp-style volume slider in the transport bar
 - Two themes: Modern and Classic (green-on-black Winamp look with LCD readouts)
