@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gexoplayer/core/track.dart';
 
 /// flutter test renders with a block font by default; load real fonts so
-/// screenshots are readable. Silently skipped when a font is missing.
+/// screenshots are readable. Fonts are bundled in test/fonts so results match CI.
 Future<void> loadTestFonts() async {
   Future<void> load(String family, List<String> paths) async {
     final loader = FontLoader(family);
@@ -23,11 +23,10 @@ Future<void> loadTestFonts() async {
     if (any) await loader.load();
   }
 
-  final home = Platform.environment['HOME'] ?? '';
-  final mf = '$home/flutter/bin/cache/artifacts/material_fonts';
-  await load('Roboto', ['$mf/Roboto-Regular.ttf', '$mf/Roboto-Bold.ttf']);
-  await load('MaterialIcons', ['$mf/MaterialIcons-Regular.otf']);
-  await load('monospace', ['/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf']);
+  const d = 'test/fonts';
+  await load('Roboto', ['$d/Roboto-Regular.ttf', '$d/Roboto-Bold.ttf']);
+  await load('MaterialIcons', ['$d/MaterialIcons-Regular.otf']);
+  await load('monospace', ['$d/DejaVuSansMono.ttf']);
 }
 
 /// Demo library with tags (no files needed).
