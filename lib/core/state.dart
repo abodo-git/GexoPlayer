@@ -4,6 +4,9 @@ import 'playlist.dart';
 /// Visual theme choice.
 enum GxThemeMode { modern, classic }
 
+/// ReplayGain mode (volume normalisation from file tags).
+enum GxReplayGain { off, track, album }
+
 /// Everything that survives an app restart. Pure Dart, unit tested;
 /// [StateStore] handles the file I/O.
 class GxPlayerState {
@@ -16,6 +19,7 @@ class GxPlayerState {
   GxThemeMode theme = GxThemeMode.modern;
   bool showRemaining = false;
   double speed = 1.0;
+  GxReplayGain replayGain = GxReplayGain.off;
   final GxEq eq = GxEq();
 
   static const schemaVersion = 2;
@@ -31,6 +35,7 @@ class GxPlayerState {
         'theme': theme.name,
         'showRemaining': showRemaining,
         'speed': speed,
+        'replayGain': replayGain.name,
         'eq': eq.toJson(),
       };
 
@@ -52,6 +57,8 @@ class GxPlayerState {
     s.showRemaining = j['showRemaining'] == true;
     final sp = j['speed'];
     if (sp is num) s.speed = sp.toDouble().clamp(0.5, 2.0).toDouble();
+    s.replayGain =
+        GxReplayGain.values.asNameMap()[j['replayGain']] ?? GxReplayGain.off;
     final e = j['eq'];
     if (e is Map<String, dynamic>) s.eq.loadJson(e);
     return s;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'backend.dart';
 import 'equalizer.dart';
@@ -15,6 +16,8 @@ class AudioEngine {
   final GxPlaylist playlist = GxPlaylist();
   final GxEq eq = GxEq();
   final void Function() onChanged;
+  /// Check that files exist before playing (off for demo/test paths).
+  final bool checkFiles;
   late final GxSleepTimer sleep;
 
   double _volume = 0.8;
@@ -24,8 +27,16 @@ class AudioEngine {
   double _speed = 1.0;
   double get speed => _speed;
 
-  AudioEngine({required this.onChanged, AudioBackend? backend})
+  GxReplayGain _rg = GxReplayGain.off;
+  GxReplayGain get replayGain => _rg;
+  Duration? loopA, loopB;
+  bool get looping => loopA != null && loopB != null;
+
+  AudioEngine({required this.onChanged, AudioBackend? backend, this.checkFiles = true})
       : backend = backend ?? MediaKitBackend() {
+    unawaited(this.backend.setOption('gapless-audio', 'yes'));
+    unawaited(this.backend.setOption('prefetch-playlist', 'yes'));
+    this.backend.errors.listen((_) => _onPlayError());
     this.backend.completed.listen((done) {
       if (done) _play(playlist.next(auto: true));
     });
@@ -49,6 +60,8 @@ class AudioEngine {
     eq.copyFrom(s.eq);
     _volume = s.volume;
     _speed = s.speed;
+    _rg = s.replayGain;
+    await backend.setOption('replaygain', _rg.name == 'off' ? 'no' : _rg.name);
     playlist.tracks
       ..clear()
       ..addAll(s.tracks.map(GxTrack.fromPath));
@@ -101,15 +114,72 @@ class AudioEngine {
     onChanged();
   }
 
-  Future<void> _play(GxTrack? t) async {
+  int _skipStreak = 0;
+
+  Future<void> _play(GxTrack? t, {bool forward = true}) async {
+    clearLoop();
     if (t == null) {
       await backend.stop();
+      onChanged();
+      return;
+    }
+    if (checkFiles && !File(t.path).existsSync()) {
+      t.missing = true;
+      await _skip(forward);
+      return;
+    }
+    _skipStreak = 0;
+    t.missing = false;
+    await backend.open(t.path);
+    if (!t.metaLoaded) unawaited(_loadMeta(t));
+    if (t.metaLoaded && t.cover == null) unawaited(_reloadCover(t));
+    onChanged();
+  }
+
+  /// A file is missing or failed to play: mark it and move on, but stop
+  /// when every track in the list has failed in a row.
+  Future<void> _skip(bool forward) async {
+    onChanged();
+    if (++_skipStreak >= playlist.tracks.length) {
+      _skipStreak = 0;
+      await backend.stop();
+      return;
+    }
+    await _play(forward ? playlist.next(auto: true) : playlist.previous(),
+        forward: forward);
+  }
+
+  void _onPlayError() {
+    final t = playlist.current;
+    if (t == null) return;
+    t.missing = true;
+    unawaited(_skip(true));
+  }
+
+  Future<void> setReplayGain(GxReplayGain m) async {
+    _rg = m;
+    await backend.setOption('replaygain', m == GxReplayGain.off ? 'no' : m.name);
+    onChanged();
+  }
+
+  /// A-B loop: first call sets A at [pos], second sets B, third clears.
+  Future<void> cycleLoop(Duration pos) async {
+    if (loopA == null) {
+      loopA = pos;
+    } else if (loopB == null) {
+      if (pos <= loopA!) return;
+      loopB = pos;
+      await backend.setAbLoop(loopA, loopB);
     } else {
-      await backend.open(t.path);
-      if (!t.metaLoaded) unawaited(_loadMeta(t));
-      if (t.metaLoaded && t.cover == null) unawaited(_reloadCover(t));
+      clearLoop();
     }
     onChanged();
+  }
+
+  void clearLoop() {
+    if (loopA == null && loopB == null) return;
+    loopA = loopB = null;
+    unawaited(backend.setAbLoop(null, null));
   }
 
   // Tracks scanned in bulk skip cover art; fetch it when they start playing.
@@ -125,7 +195,7 @@ class AudioEngine {
   }
 
   Future<void> next() => _play(playlist.next());
-  Future<void> previous() => _play(playlist.previous());
+  Future<void> previous() => _play(playlist.previous(), forward: false);
   Future<void> toggle() => backend.playOrPause();
   Future<void> seek(Duration d) => backend.seek(d);
 

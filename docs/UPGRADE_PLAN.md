@@ -9,7 +9,7 @@ Working loop for every chunk: implement -> unit tests -> widget tests with real 
 | # | Theme | Items | Status |
 |---|---|---|---|
 | 1 | Foundation + library feel | AudioBackend seam (fake backend for tests/screens), tag + cover art reading off the UI isolate, search, sort, play-next queue, sleep timer, playback speed, mute, keyboard shortcuts, ListTile ink fix | done (v0.3.0) |
-| 2 | Playback quality | gapless/prefetch tuning, ReplayGain (track/album), crossfade, A-B loop, resume per track for long files, audio-device selection on desktop, error handling for missing/unreadable files (skip + mark) | next |
+| 2 | Playback quality | gapless/prefetch (done), ReplayGain track/album (done), A-B loop (done), missing/unreadable file skip + mark (done); remaining: crossfade, per-track resume for long files, audio-device selection | v0.4.0 partly done |
 | 3 | Library | persistent media library (SQLite), scan folders in background with progress, Albums / Artists / Folders / Genres views, album grid with covers, recently added/played, favorites, multiple named playlists | |
 | 4 | System integration | Android foreground service + notification + lock-screen controls (audio_service), headset buttons, audio focus; Windows SMTC/media keys, tray, single instance, file associations/"Open with" | |
 | 5 | Visuals | real spectrum/waveform visualizer (FFT via libmpv/PCM tap), mini mode, now-playing full screen, dynamic colors from cover art, skin system (Winamp-style) with theme editor | |

@@ -14,6 +14,8 @@ class GxTrack {
   Duration? duration;
   Uint8List? cover;
   bool metaLoaded = false;
+  /// Set when the file could not be found or played; skipped on advance.
+  bool missing = false;
 
   GxTrack(this.path, this.title);
 

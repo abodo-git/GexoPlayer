@@ -37,6 +37,7 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage> {
   late final AudioEngine engine = AudioEngine(
     backend: widget.backend,
+    checkFiles: widget.backend == null,
     onChanged: () {
       if (mounted) setState(() {});
     },
@@ -109,6 +110,7 @@ class _PlayerPageState extends State<PlayerPage> {
       ..positionMs = pos.inMilliseconds
       ..volume = engine.volume
       ..speed = engine.speed
+      ..replayGain = engine.replayGain
       ..theme = themeMode
       ..showRemaining = showRemaining;
     s.eq.copyFrom(engine.eq);
@@ -571,13 +573,14 @@ class _PlayerPageState extends State<PlayerPage> {
                   color: palette.playlistText.withValues(alpha: 0.6))),
         ),
         title: Text(
-          t.display,
+          t.missing ? '${t.display}  (file missing)' : t.display,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontFamily: 'monospace',
             fontSize: 13,
-            color: fg,
+            decoration: t.missing ? TextDecoration.lineThrough : null,
+            color: t.missing ? Colors.redAccent : fg,
             fontWeight: selected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
@@ -719,6 +722,46 @@ class _PlayerPageState extends State<PlayerPage> {
             Text(rem == null ? 'Sleep' : _fmt(rem),
                 style: TextStyle(color: palette.text, fontSize: 12)),
           ]),
+        ),
+        const SizedBox(width: 8),
+        _chip(
+          active: engine.loopA != null,
+          onTap: () {
+            engine.cycleLoop(pos);
+            setState(() {});
+          },
+          child: Text(
+              engine.looping
+                  ? 'A-B on'
+                  : engine.loopA != null
+                      ? 'A set'
+                      : 'A-B',
+              style: TextStyle(color: palette.text, fontSize: 12)),
+        ),
+        const SizedBox(width: 8),
+        PopupMenuButton<GxReplayGain>(
+          tooltip: 'ReplayGain',
+          initialValue: engine.replayGain,
+          onSelected: (v) {
+            engine.setReplayGain(v);
+            _persistSoon();
+          },
+          itemBuilder: (_) => [
+            for (final m in GxReplayGain.values)
+              CheckedPopupMenuItem(
+                  value: m,
+                  checked: m == engine.replayGain,
+                  child: Text(m == GxReplayGain.off
+                      ? 'ReplayGain off'
+                      : 'ReplayGain: ${m.name}')),
+          ],
+          child: IgnorePointer(
+            child: _chip(
+              active: engine.replayGain != GxReplayGain.off,
+              child: Text('RG',
+                  style: TextStyle(color: palette.text, fontSize: 12)),
+            ),
+          ),
         ),
         const Spacer(),
         Text('${engine.playlist.tracks.length} tracks',

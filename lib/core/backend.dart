@@ -18,6 +18,12 @@ abstract class AudioBackend {
   Future<void> setVolume(double v);
   Future<void> setSpeed(double s);
   Future<void> setFilter(String af);
+  /// Raw backend option (mpv property name and value). Best effort.
+  Future<void> setOption(String name, String value);
+  /// A-B loop; null clears an end. Both null clears the loop.
+  Future<void> setAbLoop(Duration? a, Duration? b);
+  /// Playback errors (unreadable or unsupported file).
+  Stream<String> get errors;
   Future<void> dispose();
 }
 
@@ -69,6 +75,26 @@ class MediaKitBackend implements AudioBackend {
   }
 
   @override
+  Future<void> setOption(String name, String value) async {
+    final platform = _p.platform;
+    if (platform is NativePlayer) {
+      try {
+        await platform.setProperty(name, value);
+      } catch (_) {}
+    }
+  }
+
+  @override
+  Future<void> setAbLoop(Duration? a, Duration? b) async {
+    String f(Duration? d) => d == null ? 'no' : (d.inMilliseconds / 1000).toStringAsFixed(3);
+    await setOption('ab-loop-a', f(a));
+    await setOption('ab-loop-b', f(b));
+  }
+
+  @override
+  Stream<String> get errors => _p.stream.error;
+
+  @override
   Future<void> dispose() => _p.dispose();
 }
 
@@ -85,6 +111,10 @@ class FakeBackend implements AudioBackend {
   String filter = '';
   Duration lastSeek = Duration.zero;
   final List<String> openLog = [];
+  final Map<String, String> options = {};
+  Duration? loopA, loopB;
+  final _err = StreamController<String>.broadcast();
+  void emitError(String m) => _err.add(m);
 
   void finishTrack() => _done.add(true);
   void emitPosition(Duration d) => _pos.add(d);
@@ -128,6 +158,16 @@ class FakeBackend implements AudioBackend {
   Future<void> setSpeed(double s) async => speed = s;
   @override
   Future<void> setFilter(String af) async => filter = af;
+  @override
+  Future<void> setOption(String name, String value) async => options[name] = value;
+  @override
+  Future<void> setAbLoop(Duration? a, Duration? b) async {
+    loopA = a;
+    loopB = b;
+  }
+
+  @override
+  Stream<String> get errors => _err.stream;
   @override
   Future<void> dispose() async {}
 }
