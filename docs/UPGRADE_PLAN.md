@@ -10,7 +10,7 @@ Working loop for every chunk: implement -> unit tests -> widget tests with real 
 |---|---|---|---|
 | 1 | Foundation + library feel | AudioBackend seam (fake backend for tests/screens), tag + cover art reading off the UI isolate, search, sort, play-next queue, sleep timer, playback speed, mute, keyboard shortcuts, ListTile ink fix | done (v0.3.0) |
 | 2 | Playback quality | gapless/prefetch (done), ReplayGain track/album (done), A-B loop (done), missing/unreadable file skip + mark (done); remaining: crossfade, per-track resume for long files, audio-device selection | v0.4.0 partly done |
-| 3 | Library | persistent media library (SQLite), scan folders in background with progress, Albums / Artists / Folders / Genres views, album grid with covers, recently added/played, favorites, multiple named playlists | |
+| 3 | Library | JSON-indexed library (incremental rescan by mtime, removes vanished files), Albums grid with covers / Artists / Folders, favorites, recently played, named playlists (done, v0.5.0); remaining: Genres view, SQLite if 50k+ tracks is slow, library-wide search UI | v0.5.0 done |
 | 4 | System integration | Android foreground service + notification + lock-screen controls (audio_service), headset buttons, audio focus; Windows SMTC/media keys, tray, single instance, file associations/"Open with" | |
 | 5 | Visuals | real spectrum/waveform visualizer (FFT via libmpv/PCM tap), mini mode, now-playing full screen, dynamic colors from cover art, skin system (Winamp-style) with theme editor | |
 | 6 | Lyrics + tags | embedded/.lrc synced lyrics, tag editor, cover search/replace | |

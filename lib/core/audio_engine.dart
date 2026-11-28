@@ -18,6 +18,8 @@ class AudioEngine {
   final void Function() onChanged;
   /// Check that files exist before playing (off for demo/test paths).
   final bool checkFiles;
+  /// Called when a track actually starts (history, scrobbling).
+  void Function(GxTrack)? onTrackStarted;
   late final GxSleepTimer sleep;
 
   double _volume = 0.8;
@@ -86,6 +88,16 @@ class AudioEngine {
     onChanged();
   }
 
+  /// Replace the playlist with [tracks] and start playing at [start].
+  Future<void> replaceAndPlay(List<GxTrack> tracks, int start) async {
+    playlist.clear();
+    playlist.add(tracks);
+    playlist.select(start.clamp(0, tracks.length - 1));
+    await _play(playlist.current);
+    unawaited(loadAllMetadata());
+    onChanged();
+  }
+
   Future<void> addTracks(Iterable<GxTrack> t) async {
     final list = t.toList();
     final first = playlist.tracks.isEmpty;
@@ -131,6 +143,7 @@ class AudioEngine {
     _skipStreak = 0;
     t.missing = false;
     await backend.open(t.path);
+    onTrackStarted?.call(t);
     if (!t.metaLoaded) unawaited(_loadMeta(t));
     if (t.metaLoaded && t.cover == null) unawaited(_reloadCover(t));
     onChanged();

@@ -9,6 +9,9 @@ import 'package:path/path.dart' as p;
 
 import '../core/audio_engine.dart';
 import '../core/backend.dart';
+import '../core/library.dart';
+import 'library_page.dart';
+import 'package:path_provider/path_provider.dart';
 import '../core/m3u.dart';
 import '../core/playlist.dart';
 import '../core/state.dart';
@@ -24,12 +27,14 @@ class PlayerPage extends StatefulWidget {
   final GxThemeMode? initialTheme;
   /// Pre-filled playlist for tests and screenshots (skips the file pickers).
   final List<GxTrack>? initialTracks;
+  final GxLibrary? initialLibrary;
   const PlayerPage(
       {super.key,
       this.backend,
       this.persist = true,
       this.initialTheme,
-      this.initialTracks});
+      this.initialTracks,
+      this.initialLibrary});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -48,6 +53,18 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _searching = false;
   String _query = '';
   final StateStore _store = StateStore();
+  late GxLibrary library = widget.initialLibrary ?? GxLibrary();
+  late final GxLibraryStore _libStore = GxLibraryStore(() async {
+    final dir = await getApplicationSupportDirectory();
+    return File(p.join(dir.path, 'gexoplayer_library.json'));
+  });
+  Timer? _libSaveTimer;
+
+  void _libChanged() {
+    if (!widget.persist) return;
+    _libSaveTimer?.cancel();
+    _libSaveTimer = Timer(const Duration(seconds: 1), () => unawaited(_libStore.save(library)));
+  }
 
   Duration pos = Duration.zero, dur = Duration.zero;
   GxThemeMode themeMode = GxThemeMode.modern;
@@ -69,6 +86,15 @@ class _PlayerPageState extends State<PlayerPage> {
     engine.duration.listen((d) {
       if (mounted) setState(() => dur = d);
     });
+    engine.onTrackStarted = (t) {
+      library.played(t.path);
+      _libChanged();
+    };
+    if (widget.persist) {
+      _libStore.load().then((l) {
+        if (mounted) setState(() => library = l);
+      });
+    }
     if (widget.initialTheme != null) themeMode = widget.initialTheme!;
     _posTimer = Timer.periodic(const Duration(seconds: 5), (_) => _persistSoon());
     if (widget.persist) {
@@ -91,6 +117,8 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _libSaveTimer?.cancel();
+    if (widget.persist) unawaited(_libStore.save(library));
     _posTimer?.cancel();
     _searchCtl.dispose();
     _searchFocus.dispose();
@@ -246,6 +274,84 @@ class _PlayerPageState extends State<PlayerPage> {
   void _removeAt(int i) {
     setState(() => engine.playlist.removeAt(i));
     _persistSoon();
+  }
+
+  // --- Library ---------------------------------------------------------------
+
+  Future<String?> _scanFolder() async {
+    final dir = await FilePicker.getDirectoryPath();
+    if (dir == null) return null;
+    try {
+      final r = await library.scan(Directory(dir));
+      _libChanged();
+      return 'Library: ${r.added} added, ${r.updated} updated, ${r.removed} removed'
+          '${r.failed > 0 ? ', ${r.failed} unreadable' : ''}';
+    } catch (_) {
+      return 'Could not scan that folder';
+    }
+  }
+
+  void _openLibrary() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => LibraryPage(
+        library: library,
+        palette: palette,
+        onScan: widget.persist ? _scanFolder : null,
+        onChanged: _libChanged,
+        onPlay: (tracks, start) async {
+          await engine.replaceAndPlay(tracks, start);
+          _persistSoon();
+        },
+        onAdd: (tracks) async {
+          await engine.addTracks(tracks);
+          _persistSoon();
+        },
+      ),
+    ));
+  }
+
+  Future<void> _savePlaylist() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (engine.playlist.tracks.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('Playlist is empty')));
+      return;
+    }
+    final ctl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save playlist'),
+        content: TextField(
+            controller: ctl,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: 'Name'),
+            onSubmitted: (v) => Navigator.of(ctx).pop(v)),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(ctl.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    library.savePlaylist(name, engine.playlist.tracks.map((t) => t.path));
+    _libChanged();
+    messenger.showSnackBar(SnackBar(content: Text('Saved playlist "${name.trim()}"')));
+  }
+
+  Widget _favButton(GxTrack? t) {
+    final fav = t != null && library.favorites.contains(t.path);
+    return IconButton(
+      tooltip: fav ? 'Remove favorite' : 'Add favorite',
+      visualDensity: VisualDensity.compact,
+      icon: Icon(fav ? Icons.favorite : Icons.favorite_border,
+          color: fav ? palette.accent : palette.lcdText.withValues(alpha: 0.6)),
+      onPressed: t == null
+          ? null
+          : () {
+              setState(() => library.toggleFavorite(t.path));
+              _libChanged();
+            },
+    );
   }
 
   // --- Formatting ----------------------------------------------------------
@@ -455,6 +561,10 @@ class _PlayerPageState extends State<PlayerPage> {
           icon: Icon(Icons.more_vert, color: palette.text),
           onSelected: (v) {
             switch (v) {
+              case 'library':
+                _openLibrary();
+              case 'saveplaylist':
+                _savePlaylist();
               case 'files':
                 _addFiles();
               case 'folder':
@@ -474,6 +584,9 @@ class _PlayerPageState extends State<PlayerPage> {
             }
           },
           itemBuilder: (_) => const [
+            PopupMenuItem(value: 'library', child: Text('Library')),
+            PopupMenuItem(value: 'saveplaylist', child: Text('Save playlist')),
+            PopupMenuDivider(),
             PopupMenuItem(value: 'files', child: Text('Add files')),
             PopupMenuItem(value: 'folder', child: Text('Add folder')),
             PopupMenuDivider(),
@@ -549,6 +662,7 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
           ]),
         ),
+        _favButton(t),
       ]),
     );
   }

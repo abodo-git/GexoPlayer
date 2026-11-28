@@ -2,7 +2,10 @@
 
 A fast, Winamp-inspired music player. One Flutter/Dart codebase for **Windows** and **Android** (Linux builds for development). Audio is played by libmpv through [media_kit](https://pub.dev/packages/media_kit): gapless-capable, wide format support.
 
-## Status (v0.4)
+## Status (v0.5)
+- Library: scan folders (incremental), Albums grid with cover art, Artists, Folders, Favorites (heart), Recent, saved named playlists
+
+### v0.4
 - Gapless playback, ReplayGain (track/album), A-B loop, missing or unplayable files are marked and skipped
 
 ### v0.3
